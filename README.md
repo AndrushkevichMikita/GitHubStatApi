@@ -7,6 +7,9 @@
 - **GitHub API Integration**:
   - Fetches repository contents, including directories and files.
   - Supports filtering by file extensions (e.g., `.js`, `.ts`).
+  - 
+- **Cancellation Support**:
+  - Implemented cancellation tokens across the application to allow for graceful termination of operations, ensuring better control over long-running tasks and responsiveness to user actions.
 
 - **Resilience Patterns**:
 
