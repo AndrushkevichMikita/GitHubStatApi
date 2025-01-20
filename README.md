@@ -99,6 +99,8 @@ dotnet test
 
 ## Future Improvements
 
+- **Modular Architecture**:
+  - Consider adopting a modular architecture if the solution grows to improve maintainability and scalability.
 - **Archives Support**:
   - Use GitHub's tarball or zipball archive endpoints to efficiently retrieve and process repository data in bulk.
 - **Extended File Analysis**:
