@@ -25,9 +25,9 @@ namespace GitHubStatApi.Controllers
                 allowedFileExtensions = new List<string>() { ".js", ".ts" };
             }
 
-            var filesContent = _gitHubService.StreamRepositoryContent(allowedFileExtensions, HttpContext.RequestAborted);
+            var filesContent = await _gitHubService.GetContentOfTSAndJSFiles(allowedFileExtensions, HttpContext.RequestAborted);
 
-            var frequencies = await _fileProcessor.CalculateLetterFrequenciesAsync(filesContent);
+            var frequencies = _fileProcessor.CalculateLetterFrequencies(filesContent);
 
             return Ok(frequencies);
         }

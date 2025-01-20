@@ -19,9 +19,12 @@ namespace GitHubStatApi.Services
 
         private readonly IPolicyFactory _retryPolicyFactory;
 
+        private readonly IFileContentAnalyzerService _fileContentAnalyzerService;
+
         public GitHubService(
             IOptions<GitHubOptions> config,
             IPolicyFactory retryPolicyFactory,
+            IFileContentAnalyzerService fileContentAnalyzerService,
             IGitHubClientFactory gitHubClientFactory)
         {
             _gitHubOptions = config.Value;
@@ -30,6 +33,7 @@ namespace GitHubStatApi.Services
                                            retryPolicyFactory.CreateCircuitBreakerPolicy(TimeSpan.FromSeconds(10), 2));
 
             _retryPolicyFactory = retryPolicyFactory;
+            _fileContentAnalyzerService = fileContentAnalyzerService;
 
             _client = gitHubClientFactory.CreateClient();
         }
@@ -38,10 +42,40 @@ namespace GitHubStatApi.Services
         {
             var contents = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetAllContents("/"), cancellationToken);
 
+            var frequencies = _fileContentAnalyzerService.CreateLetterFrequencies();
             var files = new ConcurrentBag<string>();
-            await Process(contents, files, allowedFileExtensions, cancellationToken);
+            await Process(contents, files, frequencies, allowedFileExtensions, cancellationToken);
 
             return files.ToList();
+        }
+
+        private async Task Process(
+           IReadOnlyList<RepositoryContent> contents,
+           ConcurrentBag<string> files,
+           ConcurrentDictionary<char, int> frequencies,
+           List<string> allowedFileExtensions,
+           CancellationToken cancellationToken)
+        {
+            await Parallel.ForEachAsync(contents, cancellationToken, async (content, cToken) =>
+            {
+                if (content.Type == ContentType.Dir)
+                {
+                    var subContents = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetAllContents(content.Path), cToken);
+                    await Process(subContents, files, frequencies, allowedFileExtensions, cToken);
+                }
+                else if (content.Type == ContentType.File && IsAllowedExtension(content.Name, allowedFileExtensions))
+                {
+                    var fileContent = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetFileRawContent(content.Path), cToken);
+                    if (fileContent?.Length > 0)
+                    {
+                        var contentAsString = System.Text.Encoding.UTF8.GetString(fileContent) ?? string.Empty;
+
+                        _fileContentAnalyzerService.CalculateLetterFrequencies(frequencies, contentAsString);
+
+                        files.Add(System.Text.Encoding.UTF8.GetString(fileContent));
+                    }
+                }
+            });
         }
 
         public virtual async Task<IReadOnlyList<RepositoryContent>> GetAllContents(string path)
@@ -91,27 +125,7 @@ namespace GitHubStatApi.Services
             }
         }
 
-        private async Task Process(
-            IReadOnlyList<RepositoryContent> contents,
-            ConcurrentBag<string> files,
-            List<string> allowedFileExtensions,
-            CancellationToken cancellationToken)
-        {
-            await Parallel.ForEachAsync(contents, cancellationToken, async (content, cToken) =>
-            {
-                if (content.Type == ContentType.Dir)
-                {
-                    var subContents = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetAllContents(content.Path), cToken);
-                    await Process(subContents, files, allowedFileExtensions, cToken);
-                }
-                else if (content.Type == ContentType.File && IsAllowedExtension(content.Name, allowedFileExtensions))
-                {
-                    var fileContent = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetFileRawContent(content.Path), cToken);
-                    if (fileContent?.Length > 0)
-                        files.Add(System.Text.Encoding.UTF8.GetString(fileContent));
-                }
-            });
-        }
+
 
         private bool IsAllowedExtension(string fileName, List<string> allowedFileExtensions)
         {
