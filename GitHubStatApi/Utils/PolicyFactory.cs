@@ -5,7 +5,7 @@ using Polly.CircuitBreaker;
 using Polly.Retry;
 using Polly.Wrap;
 
-namespace GitHubStatApi.Services
+namespace GitHubStatApi.Utils
 {
     public class PolicyFactory : IPolicyFactory
     {
@@ -35,7 +35,7 @@ namespace GitHubStatApi.Services
 
         public AsyncRetryPolicy CreateRateLimitExceededPolicy()
         {
-            return Policy.Handle<ApiException>(ex => ex is RateLimitExceededException)
+            return Policy.Handle<ApiException>()
                          .WaitAndRetryAsync(1, (attempt, context) =>
                          {
                              double delay = 1;

@@ -1,6 +1,7 @@
 using GitHubStatApi.Configuration;
 using GitHubStatApi.Interfaces;
 using GitHubStatApi.Services;
+using GitHubStatApi.Utils;
 using Microsoft.AspNetCore.Diagnostics;
 using static System.Net.Mime.MediaTypeNames;
 
@@ -14,7 +15,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 builder.Services.AddScoped<IFileContentAnalyzerService, FileContentAnalyzerService>();
-builder.Services.AddScoped<IGitHubService, GitHubService>();
+builder.Services.AddScoped<IGitHubRepoService, GitHubRepoService>();
 
 builder.Services.AddSingleton<IPolicyFactory, PolicyFactory>();
 builder.Services.AddSingleton<IGitHubClientFactory, GitHubClientFactory>();

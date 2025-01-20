@@ -4,8 +4,6 @@
     {
         public string ProductGitHubAccessToken { get; set; }
 
-        public string ProductInfoVersion { get; set; }
-
         public string ProductInfoName { get; set; }
 
         public string Owner { get; set; }

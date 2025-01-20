@@ -3,7 +3,7 @@ using GitHubStatApi.Interfaces;
 using Microsoft.Extensions.Options;
 using Octokit;
 
-namespace GitHubStatApi.Services
+namespace GitHubStatApi.Utils
 {
     public class GitHubClientFactory : IGitHubClientFactory
     {
