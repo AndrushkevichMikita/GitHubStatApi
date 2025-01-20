@@ -34,6 +34,7 @@ namespace GitHubStatApiTests.Tests
         public async Task GetContentOfTSAndJSFiles_ShouldRetry_OnApiExceededException()
         {
             // Arrange
+            var allowedFileExtensions = new List<string>() { ".js", ".ts" };
             var mockFileContent = "console.log('test');";
 
             var apiException = new ApiException("mock error", System.Net.HttpStatusCode.ServiceUnavailable);
@@ -50,7 +51,7 @@ namespace GitHubStatApiTests.Tests
             _mockService.Setup(c => c.GetFileRawContent(It.IsAny<string>()))
                         .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(mockFileContent));
             // Act
-            var result = await _mockService.Object.GetContentOfTSAndJSFiles(CancellationToken.None);
+            var result = await _mockService.Object.GetContentOfTSAndJSFiles(allowedFileExtensions, CancellationToken.None);
 
             // Assert
             Assert.Single(result);
@@ -61,6 +62,7 @@ namespace GitHubStatApiTests.Tests
         public async Task GetContentOfTSAndJSFiles_ShouldThrowException_WhenRetryCountExceeds()
         {
             // Arrange
+            var allowedFileExtensions = new List<string>() { ".js", ".ts" };
             var apiException = new ApiException("mock error", System.Net.HttpStatusCode.ServiceUnavailable);
 
             _mockService.Setup(c => c.GetAllContents(It.IsAny<string>()))
@@ -68,19 +70,20 @@ namespace GitHubStatApiTests.Tests
 
             // Act & Assert
             await Assert.ThrowsAsync<ApiException>(() =>
-                _mockService.Object.GetContentOfTSAndJSFiles(CancellationToken.None));
+                _mockService.Object.GetContentOfTSAndJSFiles(allowedFileExtensions, CancellationToken.None));
         }
 
         [Fact]
         public async Task GetContentOfTSAndJSFiles_ShouldHonorCancellation()
         {
             // Arrange
+            var allowedFileExtensions = new List<string>() { ".js", ".ts" };
             var cancellationTokenSource = new CancellationTokenSource();
             cancellationTokenSource.Cancel();
 
             // Act & Assert
             await Assert.ThrowsAsync<OperationCanceledException>(() =>
-                _mockService.Object.GetContentOfTSAndJSFiles(cancellationTokenSource.Token));
+                _mockService.Object.GetContentOfTSAndJSFiles(allowedFileExtensions, cancellationTokenSource.Token));
         }
     }
 }

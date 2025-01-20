@@ -25,5 +25,26 @@ namespace GitHubStatApi.Services
             return frequencies.OrderByDescending(kv => kv.Value)
                               .ToDictionary(kv => kv.Key, kv => kv.Value);
         }
+
+        public async Task<Dictionary<char, int>> CalculateLetterFrequenciesAsync(IAsyncEnumerable<string> filesContent)
+        {
+            var frequencies = new ConcurrentDictionary<char, int>(
+                Enumerable.Range('a', 26)
+                          .Select(x => new KeyValuePair<char, int>((char)x, 0)));
+
+            await foreach (var fileContent in filesContent)
+            {
+                Parallel.ForEach(fileContent.ToLower(), c =>
+                {
+                    if (frequencies.ContainsKey(c))
+                    {
+                        frequencies.AddOrUpdate(c, 1, (_, oldValue) => oldValue + 1);
+                    }
+                });
+            }
+
+            return frequencies.OrderByDescending(kv => kv.Value)
+                              .ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
     }
 }

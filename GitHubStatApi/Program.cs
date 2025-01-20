@@ -15,6 +15,10 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddScoped<IFileContentAnalyzerService, FileContentAnalyzerService>();
 builder.Services.AddScoped<IGitHubService, GitHubService>();
+
+builder.Services.AddSingleton<IPolicyFactory, PolicyFactory>();
+builder.Services.AddSingleton<IGitHubClientFactory, GitHubClientFactory>();
+
 builder.Services.AddHttpClient();
 
 builder.Services.Configure<GitHubOptions>(builder.Configuration.GetSection(nameof(GitHubOptions)));

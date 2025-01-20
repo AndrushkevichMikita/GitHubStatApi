@@ -17,11 +17,17 @@ namespace GitHubStatApi.Controllers
             _fileProcessor = fileProcessor;
         }
 
-        [HttpGet]
-        public async Task<IActionResult> GetLetterFrequencies()
+        [HttpPost]
+        public async Task<IActionResult> GetLetterFrequencies(List<string> allowedFileExtensions)
         {
-            var filesContent = await _gitHubService.GetContentOfTSAndJSFiles(HttpContext.RequestAborted);
-            var frequencies = _fileProcessor.CalculateLetterFrequencies(filesContent);
+            if (allowedFileExtensions?.Any() ?? false)
+            {
+                allowedFileExtensions = new List<string>() { ".js", ".ts" };
+            }
+
+            var filesContent = _gitHubService.StreamRepositoryContent(allowedFileExtensions, HttpContext.RequestAborted);
+
+            var frequencies = await _fileProcessor.CalculateLetterFrequenciesAsync(filesContent);
 
             return Ok(frequencies);
         }

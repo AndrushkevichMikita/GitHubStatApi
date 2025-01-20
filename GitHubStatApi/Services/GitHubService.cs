@@ -3,8 +3,9 @@ using GitHubStatApi.Interfaces;
 using Microsoft.Extensions.Options;
 using Octokit;
 using Polly;
-using Polly.Retry;
+using Polly.Wrap;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace GitHubStatApi.Services
 {
@@ -14,43 +15,31 @@ namespace GitHubStatApi.Services
 
         private readonly GitHubClient _client;
 
-        private readonly AsyncRetryPolicy _retryPolicy;
+        private readonly AsyncPolicyWrap _policyWrap;
 
-        public GitHubService(IOptions<GitHubOptions> config)
+        private readonly IPolicyFactory _retryPolicyFactory;
+
+        public GitHubService(
+            IOptions<GitHubOptions> config,
+            IPolicyFactory retryPolicyFactory,
+            IGitHubClientFactory gitHubClientFactory)
         {
             _gitHubOptions = config.Value;
 
-            _client ??= new GitHubClient(new ProductHeaderValue(_gitHubOptions.ProductInfoName));
+            _policyWrap = Policy.WrapAsync(retryPolicyFactory.CreateRateLimitExceededPolicy(),
+                                           retryPolicyFactory.CreateCircuitBreakerPolicy(TimeSpan.FromSeconds(10), 2));
 
-            if (!string.IsNullOrWhiteSpace(_gitHubOptions.ProductGitHubAccessToken))
-            {
-                // Authentication with a Personal Access Token, this increases the limit of api requests per hour
-                _client.Credentials = new Credentials(_gitHubOptions.ProductGitHubAccessToken);
-            }
+            _retryPolicyFactory = retryPolicyFactory;
 
-            _retryPolicy = Policy.Handle<ApiException>(ex => ex is RateLimitExceededException || ex.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
-                                 .WaitAndRetryAsync(retryCount: 1,
-                                                    sleepDurationProvider: (attempt, context) =>
-                                                    {
-                                                        double delay = 1;
-
-                                                        if (context.TryGetValue("resetTime", out var resetTime))
-                                                            delay = ((DateTimeOffset)resetTime - DateTimeOffset.UtcNow).TotalSeconds;
-
-                                                        return TimeSpan.FromSeconds(Math.Max(delay, 1)); // at least 1 second
-                                                    },
-                                                    onRetry: async (exception, timeSpan, retryAttempt, context) =>
-                                                    {
-                                                        Console.WriteLine($"Retry {retryAttempt} after {timeSpan.TotalSeconds}s due to {exception.Message}");
-                                                    });
+            _client = gitHubClientFactory.CreateClient();
         }
 
-        public async Task<List<string>> GetContentOfTSAndJSFiles(CancellationToken cancellationToken)
+        public async Task<List<string>> GetContentOfTSAndJSFiles(List<string> allowedFileExtensions, CancellationToken cancellationToken)
         {
-            var contents = await ExecuteWithRetry(() => GetAllContents("/"), cancellationToken);
+            var contents = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetAllContents("/"), cancellationToken);
 
             var files = new ConcurrentBag<string>();
-            await Process(contents, files, cancellationToken);
+            await Process(contents, files, allowedFileExtensions, cancellationToken);
 
             return files.ToList();
         }
@@ -65,41 +54,68 @@ namespace GitHubStatApi.Services
             return await _client.Repository.Content.GetRawContent(_gitHubOptions.Owner, _gitHubOptions.Repo, path);
         }
 
+        public async IAsyncEnumerable<string> StreamRepositoryContent(
+            IEnumerable<string> allowedFileExtensions,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await foreach (var fileContent in StreamDirectoryContent("/", allowedFileExtensions.ToList(), cancellationToken))
+            {
+                yield return fileContent;
+            }
+        }
+
+        private async IAsyncEnumerable<string> StreamDirectoryContent(
+            string path,
+            List<string> allowedFileExtensions,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            var contents = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetAllContents(path), cancellationToken);
+
+            foreach (var content in contents)
+            {
+                if (content.Type == ContentType.Dir)
+                {
+                    // Recursively stream contents of subdirectories
+                    await foreach (var subContent in StreamDirectoryContent(content.Path, allowedFileExtensions, cancellationToken))
+                    {
+                        yield return subContent;
+                    }
+                }
+                else if (content.Type == ContentType.File && IsAllowedExtension(content.Name, allowedFileExtensions))
+                {
+                    // Stream file content
+                    var fileContent = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetFileRawContent(content.Path), cancellationToken);
+                    if (fileContent?.Length > 0)
+                        yield return System.Text.Encoding.UTF8.GetString(fileContent);
+                }
+            }
+        }
+
         private async Task Process(
             IReadOnlyList<RepositoryContent> contents,
             ConcurrentBag<string> files,
+            List<string> allowedFileExtensions,
             CancellationToken cancellationToken)
         {
             await Parallel.ForEachAsync(contents, cancellationToken, async (content, cToken) =>
             {
                 if (content.Type == ContentType.Dir)
                 {
-                    var subContents = await ExecuteWithRetry(() => GetAllContents(content.Path), cToken);
-                    await Process(subContents, files, cToken);
+                    var subContents = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetAllContents(content.Path), cToken);
+                    await Process(subContents, files, allowedFileExtensions, cToken);
                 }
-                else if (content.Type == ContentType.File && (content.Name.EndsWith(".js") || content.Name.EndsWith(".ts")))
+                else if (content.Type == ContentType.File && IsAllowedExtension(content.Name, allowedFileExtensions))
                 {
-                    var fileContent = await ExecuteWithRetry(() => GetFileRawContent(content.Path), cToken);
-                    files.Add(System.Text.Encoding.UTF8.GetString(fileContent));
+                    var fileContent = await _retryPolicyFactory.ExecuteWithPolicyWrap(_policyWrap, () => GetFileRawContent(content.Path), cToken);
+                    if (fileContent?.Length > 0)
+                        files.Add(System.Text.Encoding.UTF8.GetString(fileContent));
                 }
             });
         }
 
-        private async Task<T> ExecuteWithRetry<T>(Func<Task<T>> action, CancellationToken cancellationToken)
+        private bool IsAllowedExtension(string fileName, List<string> allowedFileExtensions)
         {
-            return await _retryPolicy.ExecuteAsync(async (context, token) =>
-            {
-                try
-                {
-                    return await action();
-                }
-                catch (RateLimitExceededException ex)
-                {
-                    // Add reset time to the Polly context
-                    context["resetTime"] = ex.Reset;
-                    throw;
-                }
-            }, new Context(), cancellationToken);
+            return allowedFileExtensions.Any(ext => fileName.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
         }
     }
 }
