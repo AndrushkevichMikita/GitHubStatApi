@@ -3,7 +3,7 @@ using GitHubStatApi.Interfaces;
 using GitHubStatApi.Services;
 using GitHubStatApi.Utils;
 using Microsoft.AspNetCore.Diagnostics;
-using static System.Net.Mime.MediaTypeNames;
+using Octokit;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -46,8 +46,12 @@ app.UseExceptionHandler(exceptionHandlerApp =>
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
         }
+        else if (exceptionHandlerPathFeature?.Error is ApiException)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        }
 
-        context.Response.ContentType = Application.Json;
+        context.Response.ContentType = System.Net.Mime.MediaTypeNames.Application.Json;
         await context.Response.WriteAsJsonAsync(new
         {
             exceptionHandlerPathFeature?.Error?.Message,
